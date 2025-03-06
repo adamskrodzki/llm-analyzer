@@ -599,7 +599,7 @@ def plot_token_probability(model, tokenizer, text, model_name, output_filename=N
     token_probs = np.array(token_probs)
     
     # Tokens for x-axis (all tokens except the last one, since we're looking at predictions)
-    x_tokens = tokens[:-1]
+    x_tokens = tokens[1:]
     
     # Create the plot
     plt.figure(figsize=(14, 8))
