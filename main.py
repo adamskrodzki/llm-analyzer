@@ -469,12 +469,15 @@ def plot_heat_map(loaded_model, model_name):
     print("\nVisualization Options:")
     print("1. Attention Heat Maps")
     print("2. Token Confidence Bar Chart")
-    viz_choice = input("Enter your choice (1 or 2): ")
+    print("3. Token Probability in Prompt")
+    viz_choice = input("Enter your choice (1, 2, or 3): ")
     
     if viz_choice == '1':
         save_all_attention_heatmaps(loaded_model, tokenizer, text, model_name, 2)
     elif viz_choice == '2':
         plot_token_confidence(loaded_model, tokenizer, text, model_name)
+    elif viz_choice == '3':
+        plot_token_probability(loaded_model, tokenizer, text, model_name)
     else:
         print("Invalid choice. Defaulting to Attention Heat Maps.")
         save_all_attention_heatmaps(loaded_model, tokenizer, text, model_name, 2)
@@ -538,6 +541,95 @@ def plot_token_confidence(model, tokenizer, text, model_name, output_filename=No
     
     print(f"Saved token confidence bar chart as {output_filename}")
     print(f"Saved raw token probabilities as {npy_filename}")
+
+def plot_token_probability(model, tokenizer, text, model_name, output_filename=None, output_base_dir="token_probability"):
+    """
+    Plots a bar chart showing the probability of each token in the prompt.
+    X-axis: tokens in the prompt, Y-axis: probability percentage of each token given its context.
+    
+    This function runs inference only once on the entire prompt and extracts
+    the relevant probabilities from the logits tensor.
+    """
+    # Create output directory structure
+    sample_num = int(time.time()) % 1000  # Use timestamp modulo 1000 as sample number
+    output_dir = os.path.join(output_base_dir, model_name, f"sample_{sample_num}")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    if not output_filename:
+        output_filename = os.path.join(output_dir, "token_probability.png")
+    
+    device = next(model.parameters()).device
+    
+    # Tokenize the input text
+    inputs = tokenizer(text, return_tensors="pt").to(device)
+    input_ids = inputs["input_ids"][0]  # Remove batch dimension
+    
+    # Run the model once on the entire prompt
+    with torch.no_grad():
+        outputs = model(inputs["input_ids"])
+    
+    # Get logits - shape is [batch_size, sequence_length, vocab_size]
+    # In this case, batch_size is 1
+    logits = outputs.logits[0]  # Remove batch dimension, now shape is [sequence_length, vocab_size]
+    
+    # Get token strings for display
+    tokens = [tokenizer.decode([idx.item()]) for idx in input_ids]
+    
+    # We'll collect probabilities for each token in the sequence
+    token_probs = []
+    
+    # For each position except the last one (since we're looking at predictions)
+    for i in range(len(input_ids) - 1):
+        # Get logits for the current position
+        position_logits = logits[i]
+        
+        # Convert logits to probabilities
+        probs = torch.nn.functional.softmax(position_logits, dim=-1)
+        
+        # Get the probability of the actual next token
+        next_token_id = input_ids[i + 1].item()
+        next_token_prob = probs[next_token_id].item()
+        
+        # Convert to percentage
+        next_token_prob_percent = next_token_prob * 100
+        
+        token_probs.append(next_token_prob_percent)
+    
+    # Convert to numpy array
+    token_probs = np.array(token_probs)
+    
+    # Tokens for x-axis (all tokens except the last one, since we're looking at predictions)
+    x_tokens = tokens[:-1]
+    
+    # Create the plot
+    plt.figure(figsize=(14, 8))
+    bars = plt.bar(range(len(x_tokens)), token_probs, color='skyblue')
+    plt.xticks(range(len(x_tokens)), x_tokens, rotation=45, ha='right')
+    plt.xlabel('Tokens in Prompt')
+    plt.ylabel('Probability (%)')
+    plt.title(f'Probability of Each Token Given Previous Context\nPrompt: "{text}"')
+    
+    # Add probability percentage values on top of bars
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{height:.1f}%', ha='center', va='bottom', rotation=0)
+    
+    plt.tight_layout()
+    
+    # Save the figure
+    plt.savefig(output_filename, dpi=300)
+    plt.close()
+    
+    # Also save the raw data as a .npy file
+    npy_filename = os.path.join(output_dir, "token_probability_data.npy")
+    np.save(npy_filename, {
+        "tokens": x_tokens,
+        "probabilities_percent": token_probs
+    })
+    
+    print(f"Saved token probability chart as {output_filename}")
+    print(f"Saved raw token probability data as {npy_filename}")
 
 while True:
     display_menu()
