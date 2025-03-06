@@ -111,7 +111,7 @@ def display_menu():
     print("\nMenu:")
     print("1. Load Model")
     print("2. Display Details")
-    print("3. Plot Heat Map")
+    print("3. Plot Visualizations")
     print("4. Run Inference")
     print("5. Quit")
 
@@ -465,7 +465,79 @@ def plot_heat_map(loaded_model, model_name):
     # Get the prompt from the user
     text = get_user_prompt()
     
-    save_all_attention_heatmaps(loaded_model, tokenizer, text, model_name, 2)
+    # Ask user which visualization they want
+    print("\nVisualization Options:")
+    print("1. Attention Heat Maps")
+    print("2. Token Confidence Bar Chart")
+    viz_choice = input("Enter your choice (1 or 2): ")
+    
+    if viz_choice == '1':
+        save_all_attention_heatmaps(loaded_model, tokenizer, text, model_name, 2)
+    elif viz_choice == '2':
+        plot_token_confidence(loaded_model, tokenizer, text, model_name)
+    else:
+        print("Invalid choice. Defaulting to Attention Heat Maps.")
+        save_all_attention_heatmaps(loaded_model, tokenizer, text, model_name, 2)
+
+def plot_token_confidence(model, tokenizer, text, model_name, output_filename=None, output_base_dir="token_confidence"):
+    """
+    Plots a bar chart showing token confidence levels from logits calculation.
+    X-axis: tokens, Y-axis: confidence level of each token.
+    """
+    # Create output directory structure similar to save_all_attention_heatmaps
+    sample_num = int(time.time()) % 1000  # Use timestamp modulo 1000 as sample number
+    output_dir = os.path.join(output_base_dir, model_name, f"sample_{sample_num}")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    if not output_filename:
+        output_filename = os.path.join(output_dir, "token_confidence.png")
+    
+    device = next(model.parameters()).device
+    
+    # Tokenize the input text
+    inputs = tokenizer(text, return_tensors="pt").to(device)
+    input_ids = inputs["input_ids"]
+    
+    # Run the model to get logits
+    with torch.no_grad():
+        outputs = model(input_ids)
+    
+    # Get logits for the last token prediction (next token)
+    logits = outputs.logits[0, -1, :]
+    
+    # Convert logits to probabilities using softmax
+    probabilities = torch.nn.functional.softmax(logits, dim=-1)
+    
+    # Get the top N tokens with highest probabilities
+    top_n = 20
+    top_probs, top_indices = torch.topk(probabilities, top_n)
+    
+    # Convert to numpy for plotting
+    top_probs = top_probs.cpu().numpy()
+    top_indices = top_indices.cpu().numpy()
+    
+    # Get token strings for the top indices
+    top_tokens = [tokenizer.decode([idx]) for idx in top_indices]
+    
+    # Create the bar chart
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(top_tokens)), top_probs, color='skyblue')
+    plt.xticks(range(len(top_tokens)), top_tokens, rotation=45, ha='right')
+    plt.xlabel('Tokens')
+    plt.ylabel('Confidence (Probability)')
+    plt.title(f'Top {top_n} Token Confidence Levels for Next Token Prediction\nPrompt: "{text}"')
+    plt.tight_layout()
+    
+    # Save the figure
+    plt.savefig(output_filename, dpi=300)
+    plt.close()
+    
+    # Also save the raw probabilities as a .npy file
+    npy_filename = os.path.join(output_dir, "token_probabilities.npy")
+    np.save(npy_filename, {"probabilities": top_probs, "indices": top_indices, "tokens": top_tokens})
+    
+    print(f"Saved token confidence bar chart as {output_filename}")
+    print(f"Saved raw token probabilities as {npy_filename}")
 
 while True:
     display_menu()
