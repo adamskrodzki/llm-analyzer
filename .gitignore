@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+heat_map/
 *.py[cod]
 *$py.class
 
